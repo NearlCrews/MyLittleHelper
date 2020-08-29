@@ -7,6 +7,7 @@ Quick overview of the major functions of the bot:
 2. **Abuse of the report function:** count the number of reports in a thread, compare it to a configurable threshold, and leave a reminder if the number of reports exceeds the total.
 3. **Ignore certain reports:** automatically approve report types that you don't care about.
 4. **New account greeter:** send a message to a user in the subreddit when they're posting with a new account.
+5. **Flair Manager:** This will add "Age Flair" to new accounts to help spot trolls. It also adds an flair for accounts that have been around for a long time.
 
 Be gentle. I'm still new to Python and I'm sure there are more efficient ways of doing everything. This was a "COVID-19 I'm bored" learning project. Either way, it seems to work as expected and we're receiving actionable information.
 
@@ -128,6 +129,3 @@ I'm a purpose-built bot that assists in moderating r/YourSubreddit. It appears t
 
 I'm a bot and will not reply. Please contact u/YYYYYY if this bot is misbehaving.
 ```
-
-**Flair Management:***
-This will add "Age Flair" to new accounts to help spot trolls. It also adds an flair for accounts that have been around for a long time.
