@@ -11,6 +11,9 @@ import time
 from pprint import pprint
 from datetime import datetime, timedelta, date
 import time
+from prawcore.exceptions import Forbidden
+
+# Version 2.0
 
 # Set DEBUG
 DEBUG = True
@@ -51,6 +54,13 @@ na_new_account_age = int(config['newaccount']['new_account_age'])
 na_enable = bool(config['newaccount']['enable'])
 na_subreddit_rules = str(config['newaccount']['subreddit_rules'])
 
+# FlairManager
+fm_enable = bool(config['flairmanager']['enable'])
+fm_age_floor = int(config['flairmanager']['age_floor'])
+fm_age_ceiling = int(config['flairmanager']['age_ceiling'])
+fm_age_floor_template = str(config['flairmanager']['age_floor_template'])
+fm_age_ceiling_template = str(config['flairmanager']['age_ceiling_template'])
+
 #####
 # Set a few variables.
 #####
@@ -63,7 +73,7 @@ ir_ignore_reports = re.compile(ir_report_regex, re.IGNORECASE)
 # Regex for URL validity.
 valid_url = re.compile('(?:^http.*)', re.IGNORECASE)
 
-print(f'Configuration has been read.\n')
+print(f'!CONFIG!\nConfiguration has been read.\n')
 
 #####
 # Create the Reddit object and streams.
@@ -85,7 +95,7 @@ try:
 except Exception as e:
   print(e)
 
-print(f'Reddit object and streams have been initialized.\n')
+print(f'!CONFIG!\nReddit object and streams have been initialized.\n')
 
 # Start the streaming loop for new submissions.
 while True:
@@ -130,7 +140,7 @@ while True:
           # Ignore short URL titles since the website isn't returning a title.
           if len(real_title) <= 16:
             if DEBUG:
-              print(f'AlteredHeadline:\nSkipping and saving this one since it has a short title.\n')
+              print(f'!ALTEREDHEADLINE!\nSkipping and saving this one since it has a short title.\n')
             if not submission.saved:
               submission.save()
             continue
@@ -139,7 +149,7 @@ while True:
           similarity_object = difflib.SequenceMatcher(None, submission.title.lower(), real_title.lower())
           similarity = round(similarity_object.ratio()*100)
           if DEBUG:
-            print(f'AlteredHeadline:\nUsername: {submission.author} \nSubmitted URL: {submission.url} \nPost Title: {submission.title} \nActual Title: {real_title} \nSimilarity: {similarity}\n')
+            print(f'!ALTEREDHEADLINE!\nUsername: {submission.author} \nSubmitted URL: {submission.url} \nPost Title: {submission.title} \nActual Title: {real_title} \nSimilarity: {similarity}\n')
           if (similarity >= ah_score_threshold):
             if not submission.saved:
               submission.save()
@@ -155,13 +165,13 @@ while True:
             notification = n_actual + n_posted + n_similarity + n_link + n_footer
             reddit.subreddit(reddit_target_subreddit).message('Potentially Altered Headline', notification)
             if DEBUG:
-              print(f'AlteredHeadline:\nLeaving mod notice on \"{submission.title}\"\n')
+              print(f'!ALTEREDHEADLINE!\nLeaving mod notice on \"{submission.title}\"\n')
             if not submission.saved:
               submission.save()
 
           # Leave a comment in the thread.
           if similarity <= ah_score_threshold and ah_leave_post_comment:
-            r_message = 'Hello u/{}!\n\n The title of your post differs from the actual article title and has been flagged for review. Please review {} in the r/{} subreddit rules. If this is an actual rule violation, you can always delete the submission and resubmit with the correct headline. Otherwise, this will likely be removed by the moderators. Please note that some websites change their article titles and this may be a false-positive. In that case, no further action is required. Further details: \n\n'.format(submission.author, ah_link_to_rule, reddit_target_subreddit)
+            r_message = 'Hello u/{}!\n\n The title of your post differs from the actual article title and has been flagged for review. Please review {} in the r/{} subreddit rules. If this is an actual rule violation, you can always delete the submission and resubmit with the correct headline. Otherwise, this will likely be removed by the moderators. Add `?repost` to the end of the URL if you receive an error about the link already being submitted. Please note that some websites change their article titles and this may be a false-positive. In that case, no further action is required. Further details: \n\n'.format(submission.author, ah_link_to_rule, reddit_target_subreddit)
             n_posted = '**Posted Title:** {}\n\n'.format(submission.title)
             n_actual = '**Actual Title:** {}\n\n'.format(real_title)
             n_similarity = '**Similarity:** {}%\n\n'.format(similarity)
@@ -171,7 +181,7 @@ while True:
             this_comment = post_submission.reply(comment_text)
             this_comment.mod.distinguish(how='yes')
             if DEBUG:
-               print(f'AlteredHeadline:\nLeaving user comment on \"{submission.title}\"\n')
+               print(f'!ALTEREDHEADLINE!\nLeaving user comment on \"{submission.title}\"\n')
             if not submission.saved:
               submission.save()
 
@@ -188,6 +198,59 @@ while True:
 
       try:
         #####
+        # FlairManager
+        #####
+        if fm_enable:
+          # Get the user, creation date, and age in days of the account.
+          fm_user = reddit.redditor(comment.author)
+          fm_creation_date = date.fromtimestamp(fm_user.created_utc)
+          fm_account_age = int((int(time.time()) - int(fm_user.created_utc))/(24*60*60))
+          # Look for accounts less than the floor-defined age.
+          if int(fm_account_age) <= int(fm_age_floor):
+            if DEBUG:
+              print(f'!FLAIRMANAGER FLOOR!\nFlairManager:\nUser: {comment.author}\nAccount age: {fm_account_age}\n')
+            # Chunk them into < 3 days.
+            if fm_account_age <= 3:
+              fm_age_text = "Age: < 3 Days"
+              try:
+                reddit.subreddit(reddit_target_subreddit).flair.set(comment.author, text=fm_age_text, flair_template_id=fm_age_floor_template)
+              except Forbidden as e:
+                print(e)
+                continue
+            # Get anything less than the defined floor.
+            else:
+              fm_age_text = 'Age: {} Days'.format(fm_account_age)
+              try:
+                reddit.subreddit(reddit_target_subreddit).flair.set(comment.author, text=fm_age_text, flair_template_id=fm_age_floor_template)
+              except Forbidden as e:
+                print(e)
+                continue
+
+          # Clear the flare on anyone between the floor and ceiling.
+          if (int(fm_account_age) > int(fm_age_floor)) and (int(fm_account_age) <= int(fm_age_ceiling)):
+            if comment.author_flair_text.startswith('Age: '):
+              try:
+                print(f'!FLAIRMANAGER CLEARING FLAIR!\nFlairManager:\nUser: {comment.author}\nAccount age: {fm_account_age}\nFlair Text: {comment.author_flair_text}\n')
+                reddit.subreddit(reddit_target_subreddit).flair.delete(comment.author)
+              except Forbidden as e:
+                print(e)
+                continue
+          
+          # Look for the OG accounts above the ceiling. 
+          if int(fm_account_age) >= int(fm_age_ceiling):
+            if DEBUG:
+              flair_length = len(str(comment.author_flair_text))
+              print(f'!FLAIRMANAGER CEILING!\nFlairManager:\nUser: {comment.author}\nAccount age: {fm_account_age}\nFlair length: {flair_length}\n')
+            if len(str(comment.author_flair_text)) <= 4:
+              try:
+                fm_age_text = "Age: > 10 Years"
+                reddit.subreddit(reddit_target_subreddit).flair.set(comment.author, text=fm_age_text, flair_template_id=fm_age_ceiling_template)
+                print(f'!FLAIRMANAGER OG FLAIR ADDED!\nFlairManager:\nUser: {comment.author}\nAccount age: {fm_account_age}\n')
+              except Forbidden as e:
+                print(e)
+                continue
+
+        #####
         # NewAccount
         #####
         if na_enable:
@@ -196,7 +259,7 @@ while True:
           na_creation_date = date.fromtimestamp(na_user.created_utc)
           if int(na_user.created_utc) > int(na_daysAgoSeconds):
             if DEBUG:
-              print(f'NewAccount:\nUser: {comment.author}\nAccount creation date: {na_creation_date}\nComment: {comment.body}\n')
+              print(f'!NEWACCOUNT!\nUser: {comment.author}\nAccount creation date: {na_creation_date}\nComment: {comment.body}\n')
             if not na_user.is_friend:
               # Use "day" or "days".
               if na_new_account_age == 1:
@@ -209,7 +272,7 @@ while True:
               # Send the message.
               reddit.redditor(str(comment.author)).message("Greetings!", na_message_text)
               if DEBUG:
-                print(f'NewAccount:\nGreeting sent to user: {comment.author}\nAccount creation date: {na_creation_date}\nComment: {comment.body}\n')
+                print(f'!NEWACCOUNT!\nGreeting sent to user: {comment.author}\nAccount creation date: {na_creation_date}\nComment: {comment.body}\n')
 
       except:
         continue
@@ -240,20 +303,22 @@ while True:
           for ra_comment in ra_post_submission.comments.list():
             # Check if a mod has been here.
             if ra_comment.distinguished:
-              print(f'ReportAbuse: Distinguished comment found. Assuming a moderator was here.\n')
+              print(f'!REPORTABUSE!\nDistinguished comment found. Assuming a moderator was here.\n')
               # Keep loop sanity and just tell it not to post here later.
               ra_skip_post = True
             # Find and count any reported comments.
             if ra_comment.num_reports != 0:
               ra_total_reports += 1
               if DEBUG:
-                print(f'ReportAbuse:\nCurrent report count: {ra_total_reports}\nURL: {report.link_permalink}\n')
+                print(f'!REPORTABUSE!\nCurrent report count: {ra_total_reports}\nURL: {report.link_permalink}\n')
           if int(ra_total_reports) >= int(ra_total_report_threshold) and not ra_skip_post:
             if DEBUG:
-              print(f'ReportAbuse:\nNotice Triggered.\n{report.link_permalink}\n{report.link_title}\n')
+              print(f'!REPORTABUSE!\nNotice Triggered.\n{report.link_permalink}\n{report.link_title}\n')
             ra_comment_text = 'Hello! This is an automated reminder that the report function is not a super-downvote button. Reported comments are manually reviewed and may be removed *if they are an actual rule violation*. Please do not report comments simply because you disagree with the content. Abuse of the report function is against the site rules and will be reported.\n\n{}\n\n*I\'m a bot and will not reply. Please contact u/{} if this bot is misbehaving.*'.format(ra_link_to_rules, bot_owner)
             ra_this_comment = ra_post_submission.reply(ra_comment_text)
             ra_this_comment.mod.distinguish(how='yes', sticky=True)
+            # Give them comment time to register for future loops.
+            time.sleep(5)
 
         #####
         # IgnoreReport
@@ -262,7 +327,7 @@ while True:
           ir_user_reports = " ".join(str(x) for x in report.user_reports)
           if ir_ignore_reports.match(ir_user_reports):
             if DEBUG:
-              print(f'IgnoreReport: {ir_user_reports}\n')
+              print(f'!IGNOREREPORT!\n{ir_user_reports}\n')
             ir_comment = reddit.comment(report.id)
             ir_comment.mod.approve()
             ir_post = reddit.submission(id=report.id)
